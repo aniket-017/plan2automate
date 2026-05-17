@@ -76,7 +76,9 @@ jobs:
               pm2 restart plan2automate
             else
               echo "Starting plan2automate"
+              cd backend
               pm2 start npm --name "plan2automate" -- run dev
+              cd ..
             fi
 
             # Check the status of PM2 processes
