@@ -1,0 +1,82 @@
+name: Node.js CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      # Step 1: Checkout the repository
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      # Step 2: Set up Node.js environment
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: "20.x"
+
+      # Step 3: Install backend dependencies (root)
+      - name: Install backend dependencies
+        run: npm install
+        working-directory: .
+
+      # Step 4: Setup SSH for Deployment
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H 154.53.42.27 >> ~/.ssh/known_hosts
+
+      # Step 5: Deploy to server
+      - name: Deploy to server
+        if: github.ref == 'refs/heads/main'
+        run: |
+          ssh admin@154.53.42.27 << 'EOF'
+            # If repository exists, back up config and pull latest changes; otherwise, clone the repo
+            if [ -d ~/plan2automate ]; then
+              if [ -f ~/plan2automate/backend/.env ]; then
+                cp ~/plan2automate/backend/.env ~/.env.bak
+              fi
+              cd ~/plan2automate
+              git reset --hard origin/main
+              git pull origin main
+            else
+              git clone https://github.com/aniket-017/plan2automate.git ~/plan2automate
+              cd ~/plan2automate
+            fi
+
+            # Restore the .env file if backup exists
+            if [ -f ~backend/.env.bak ]; then
+              mv ~backend/.env.bak /backend/.env
+            fi
+
+            # Install backend dependencies
+            npm install
+
+            # Install frontend dependencies and build
+            cd frontend
+            npm install --force
+            npm run build
+            cd ..
+
+            # Restart the application using PM2
+            if pm2 list | grep -q "plan2automate"; then
+              echo "Restarting plan2automate"
+              pm2 restart plan2automate
+            else
+              echo "Starting plan2automate"
+              pm2 start npm --name "plan2automate" -- run dev
+            fi
+
+            # Check the status of PM2 processes
+            pm2 list
+          EOF
